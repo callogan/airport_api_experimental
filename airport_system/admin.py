@@ -10,7 +10,7 @@ from .models import (
     Airlines,
     Flight,
     Order,
-    Ticket,
+    Ticket, Seat,
 )
 
 
@@ -41,17 +41,31 @@ class AirlinesAdmin(admin.ModelAdmin):
 
 @admin.register(Airplane)
 class AirplaneAdmin(admin.ModelAdmin):
-    list_display = ("name", "get_total_rows", "rows_with_seats")
+    list_display = ("name", "get_total_rows", "get_rows_with_seats_count")
 
     def get_total_rows(self, obj):
         return obj.total_rows
 
     get_total_rows.short_description = "Total Rows"
 
-    def rows_with_seats(self, obj):
-        return obj.get_rows_with_seat_count()
+    def get_rows_with_seats_count(self, obj):
+        return obj.rows_with_seat_count()
 
-    rows_with_seats.short_description = "Rows with seats"
+    get_rows_with_seats_count.short_description = "Rows with seats"
+
+    # class MyModelAdmin(admin.ModelAdmin):
+    #     list_display = ('my_property_display', 'other_field', 'another_field')
+    #
+    #     def my_property_display(self, obj):
+    #         return obj.my_property
+    #
+    #     my_property_display.short_description = "My Property"
+
+
+@admin.register(Seat)
+class SeatAdmin(admin.ModelAdmin):
+    list_display = ("row", "seat_number", "airplane")
+    # list_filter = ("route",)
 
 
 @admin.register(Flight)

@@ -1,21 +1,23 @@
 import pytz
 import validators as validators
 from django.db import transaction
-from rest_framework import serializers
+from rest_framework import serializers, status
 from rest_framework.exceptions import ValidationError
+from rest_framework.response import Response
 from rest_framework.validators import UniqueTogetherValidator
 
 from .models import (
     Country,
     City,
     Airport,
+    Seat,
     AirplaneType,
     Airplane,
     Airlines,
     Route,
     Flight,
     Order,
-    Ticket,
+    Ticket, Seat,
 )
 
 
@@ -76,17 +78,105 @@ class AirplaneTypeSerializer(serializers.ModelSerializer):
 
 
 class AirplaneSerializer(serializers.ModelSerializer):
+    total_rows = serializers.SerializerMethodField()
+    rows_with_seat_count = serializers.SerializerMethodField()
+
+    def get_total_rows(self, obj):
+        # Return the value of the property from the model instance
+        return obj.total_rows
+
+    def get_rows_with_seat_count(self, obj):
+        # Return the value of the property from the model instance
+        return obj.rows_with_seat_count()
+
     class Meta:
         model = Airplane
         fields = (
             "id",
             "name",
-            "rows",
-            "seats_in_row",
             "airplane_type",
             "capacity",
+            "total_rows",
+            "rows_with_seat_count",
             "image",
         )
+
+    # optional_field = serializers.CharField(required=False)
+
+
+class StandardSeatsField(serializers.Field):
+    def to_representation(self, seats):
+        return {
+            "rows": seats.row,
+            "seats": seats.seat_number
+        }
+
+    def to_internal_value(self, data):
+        return Seat(rows=data['rows'], seats=data['seats'])
+
+
+class CustomSeatsField(serializers.Field):
+    def to_representation(self, seats):
+        return [item['seat_number'] for item in seats]
+
+
+class AirplaneCreateSerializer(serializers.ModelSerializer):
+    # seats = SeatSerializer(many=True, read_only=False)
+
+    seats = StandardSeatsField(source='*', required=False)
+    custom_seats = CustomSeatsField(source='*', required=False)
+
+    class Meta:
+        model = Airplane
+        fields = ['name', 'airline', 'seats', 'custom_seats']
+
+    def validate(self, data):
+        # валидация данных
+        return data
+
+    def get_rows_with_seat_count(self, obj):
+        # Return the value of the property from the model instance
+        return obj.rows_with_seat_count()
+
+    def create(self, validated_data):
+        seats_data = validated_data.get('seats')
+        custom_seats_data = validated_data.get('custom_seats')
+
+        if seats_data:
+            airplane = self._create_standard_airplane(seats_data)
+        elif custom_seats_data:
+            airplane = self._create_custom_airplane(custom_seats_data)
+        else:
+            raise ValidationError('No seats data provided')
+
+        return airplane
+
+    def _create_standard_airplane(self, airplane, total_rows, obj):
+        seats_per_row = self.get_rows_with_seat_count(obj)
+        for row in range(1, total_rows + 1):
+            for seat_number in range(1, seats_per_row + 1):
+                Seat.objects.create(airplane=airplane, row=row, seat_number=seat_number)
+
+        # создание самолета с одинаковыми рядами
+
+    def _create_custom_airplane(self, airplane, custom_seats_data):
+
+    # создание самолета с разными рядами
+
+        for row_data in custom_seats_data:
+            row = row_data['seats__row']
+            count = row_data['seat_count']
+
+            for seat_num in range(1, count + 1):
+                Seat.objects.create(
+                    airplane=airplane,
+                    row=row,
+                    seat_number=seat_num
+                )
+    #
+    # def calculate_seats_per_row(self, airplane, total_rows):
+    #     total_seats = Seat.objects.filter(airplane=airplane).count()
+    #     return total_seats // total_rows
 
 
 class AirplaneListSerializer(AirplaneSerializer):
@@ -95,6 +185,25 @@ class AirplaneListSerializer(AirplaneSerializer):
 
 class AirlinesSerializer(serializers.ModelSerializer):
     airplanes = AirplaneSerializer(many=True, read_only=False, allow_null=False)
+
+    #RATING LOGIC
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        # Создание авиалинии
+        self.perform_create(serializer)
+
+        # Создание оценки для авиалинии
+        airline = serializer.instance
+        evaluation_data = {'airlines': airline.id, 'score': request.data.get('score')}
+        evaluation_serializer = AirlineEvaluationSerializer(data=evaluation_data)
+        evaluation_serializer.is_valid(raise_exception=True)
+        evaluation_serializer.save()
+
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
 
     class Meta:
         model = Airlines
@@ -158,7 +267,7 @@ class TicketSerializer(serializers.ModelSerializer):
     # # NEW_VALIDATOR
     class Meta:
         model = Ticket
-        fields = ("id", "row", "seat", "flight")
+        fields = ("id", "row", "seat", "flight", "type")
 
         validators = [
             UniqueTogetherValidator(
@@ -174,7 +283,7 @@ class TicketSerializer(serializers.ModelSerializer):
         seat_value = data['seat']
 
         # Используем метод get_rows_info() для получения информации о рядах
-        rows_info = airplane.get_rows_info()
+        rows_info = airplane.rows_with_seat_count()
 
         # Дополнительная валидация, например, проверка на диапазон мест
         self.context['request'] = self.context.get('request', self.context.get('view', None))
@@ -243,13 +352,27 @@ class OrderSerializer(serializers.ModelSerializer):
         model = Order
         fields = ("id", "tickets", "created_at")
 
+    # NEW CREATION (with special allocation)
     def create(self, validated_data):
         with transaction.atomic():
             tickets_data = validated_data.pop("tickets")
             order = Order.objects.create(**validated_data)
             for ticket_data in tickets_data:
-                Ticket.objects.create(order=order, **ticket_data)
+                if ticket_data["type"] == "check-in-pending":
+                    ticket = Ticket.objects.create(order=order, **ticket_data)
+                    ticket.allocate_seat() # what should I give as a parameter
+                else:
+                    Ticket.objects.create(order=order, **ticket_data)
             return order
+
+    #OLD CREATION (just simple booking)
+    # def create(self, validated_data):
+    #     with transaction.atomic():
+    #         tickets_data = validated_data.pop("tickets")
+    #         order = Order.objects.create(**validated_data)
+    #         for ticket_data in tickets_data:
+    #             Ticket.objects.create(order=order, **ticket_data)
+    #         return order
 
 
 class OrderListSerializer(OrderSerializer):

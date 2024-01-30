@@ -40,7 +40,7 @@ from .serializers import (
     FlightListSerializer,
     FlightDetailSerializer,
     OrderSerializer,
-    OrderListSerializer, AirplaneImageSerializer, AirlinesSerializer, AirlinesListSerializer,
+    OrderListSerializer, AirplaneImageSerializer, AirlinesSerializer, AirlinesListSerializer, AirplaneCreateSerializer,
 )
 
 
@@ -93,6 +93,8 @@ class AirplaneViewSet(
     def get_serializer_class(self):
         if self.action == "list":
             return AirplaneListSerializer
+        if self.action == "create":
+            return AirplaneCreateSerializer
         if self.action == "upload_image":
             return AirplaneImageSerializer
 
@@ -121,6 +123,23 @@ class AirlinesViewSet(
 ):
     queryset = Airlines.objects.all()
     serializer_class = AirlinesSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        # Создание авиалинии
+        self.perform_create(serializer)
+
+        # Создание оценки для авиалинии
+        airline = serializer.instance
+        evaluation_data = {'airlines': airline.id, 'rating': request.data.get('rating')}
+        evaluation_serializer = AirlinesSerializer(data=evaluation_data)
+        evaluation_serializer.is_valid(raise_exception=True)
+        evaluation_serializer.save()
+
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     def get_serializer_class(self):
         if self.action == "list":
@@ -188,38 +207,6 @@ class RouteViewSet(
             )
         return self.queryset
 
-    @extend_schema(
-        parameters=[
-            OpenApiParameter(
-                name="country_from",
-                description="Filter by country of departure (ex. ?country_from=the United States)",
-                type=OpenApiTypes.STR
-            ),
-            OpenApiParameter(
-                name="country_to",
-                description="Filter by country of destination (ex. ?country_to=Germany)",
-                type=OpenApiTypes.STR
-            ),
-            OpenApiParameter(
-                name="city_from",
-                description="Filter by city of departure (ex. ?city_from=New York)",
-                type=OpenApiTypes.STR
-            ),
-            OpenApiParameter(
-                name="city_to",
-                description="Filter by city of destination (ex. ?city_to=Berlin)",
-                type=OpenApiTypes.STR
-            ),
-            OpenApiParameter(
-                name="route",
-                description="Filter by city of departure & city of destination (ex. ?route=New York-Berlin)",
-                type=OpenApiTypes.STR
-            )
-        ]
-    )
-    def list(self, request, *args, **kwargs):
-        return super().list(request, *args, **kwargs)
-
 
 class FlightViewSet(
     mixins.ListModelMixin,
@@ -265,6 +252,25 @@ class FlightViewSet(
 
         return self.queryset
 
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="airport_from",
+                description="Filter by airport of departure (ex. ?airport_from=JFK)",
+                type=OpenApiTypes.STR
+            ),
+            OpenApiParameter(
+                name="airport_to",
+                description="Filter by airport of destination (ex. ?airport_to=Berlin Central)",
+                type=OpenApiTypes.STR
+            ),
+            OpenApiParameter(
+                name="date",
+                description="Filter by date of departure (ex. ?date=2024-01-18)",
+                type=OpenApiTypes.DATE
+            )
+        ]
+    )
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 

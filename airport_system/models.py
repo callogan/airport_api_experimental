@@ -4,7 +4,7 @@ import uuid
 import pytz
 from django.conf import settings
 from django.db import models, transaction, IntegrityError
-from django.db.models import Count
+from django.db.models import Count, Max
 from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework.exceptions import ValidationError
@@ -36,6 +36,38 @@ class City(models.Model):
         verbose_name_plural = "cities"
 
 
+# def get_timezone_choices():
+#     timezones = pytz.all_timezones
+#     choices = []
+#
+#     for tz in timezones:
+#         timezone = pytz.timezone(tz)
+#         current_time = datetime.now()
+#
+#         # Локализация времени в выбранной тайм зоне
+#         localized_time = timezone.localize(current_time)
+#
+#         # Нормализация времени (учитывает переход на летнее/зимнее время)
+#         normalized_time = timezone.normalize(localized_time)
+#
+#         # Перевод времени в UTC (если оно в летнее время)
+#         utc_time = normalized_time.astimezone(pytz.utc)
+#
+#         # Проверка, находится ли текущее время в летнем времени
+#         is_dst = normalized_time.dst() != timedelta(0)
+#
+#         # Формирование строки с названием тайм зоны, учетом зимнего/летнего времени
+#         if is_dst:
+#             choices.append((tz, f'{tz} ({normalized_time.strftime("%z")} - {timezone.tzname(utc_time)})'))
+#         else:
+#             choices.append((tz, f'{tz} ({normalized_time.strftime("%z")} - {timezone.tzname(None)})'))
+#
+#     return choices
+#
+# class YourModel(models.Model):
+#     timezone = models.CharField(max_length=63, default='UTC', choices=get_timezone_choices())
+
+
 class Airport(models.Model):
     name = models.CharField(max_length=255)
     closest_big_city = models.ForeignKey(City, on_delete=models.CASCADE)
@@ -45,6 +77,10 @@ class Airport(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.closest_big_city}) - {self.iata_code}"
+    #
+    # def current_local_time(self):
+    #     local_timezone = pytz.timezone(self.timezone)
+    #     return timezone.localtime(timezone.now(), local_timezone)
 
 
 class Airlines(models.Model):
@@ -92,9 +128,9 @@ class Airplane(models.Model):
         # Calculate the total number of distinct rows based on associated seats
         return self.seats.values('row').count()
 
-    def get_rows_with_seat_count(self):
+    def rows_with_seat_count(self):
         return Airplane.objects.filter(id=self.pk).values(
-            'rows'
+            'seats__row'
         ).annotate(
             seat_count=Count('id')
         )
@@ -168,11 +204,17 @@ class Order(models.Model):
 
 
 class Ticket(models.Model):
+    TYPE_CHOICES = [
+        ('check-in-pending', 'Check-in-pending'),
+        ('completed', 'Completed'),
+    ]
+
     order = models.ForeignKey(Order, related_name="tickets", on_delete=models.CASCADE)
     row = models.IntegerField()
     seat = models.IntegerField()
     flight = models.ForeignKey(Flight, related_name="tickets", on_delete=models.CASCADE)
-    allocated = models.BooleanField(default=False)
+    allocated = models.BooleanField(default=True)
+    type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='check-in-pending')
 
     def clean(self):
         super().clean()
@@ -244,7 +286,20 @@ class Ticket(models.Model):
         return None
 
     def get_max_seat_in_row(self):
-        pass
+        # Get the related Airplane for the current Ticket
+        airplane = self.flight.airplane
+
+        # Assuming there is a related Seat model with a field seat_number
+        # and it has a foreign key to Airplane
+        max_seat_in_row = (
+            Seat.objects
+            .filter(airplane=airplane)
+            .values('row')
+            .annotate(max_seat=Count('seat_number'))
+            .aggregate(Max('max_seat'))
+        )['max_seat__max']
+
+        return max_seat_in_row
 
     def clean(self):
         Ticket.validate_ticket(
@@ -268,3 +323,16 @@ class Ticket(models.Model):
         else:
             super(Ticket, self).save(using=using,
                                      update_fields=update_fields)
+
+class AirlineEvaluation(models.Model):
+    SCORE_CHOICES = (
+        (1, "1"),
+        (2, "2"),
+        (3, "3"),
+        (4, "4"),
+        (5, "5"),
+    )
+    airlines = models.ForeignKey(
+        Airlines, on_delete=models.CASCADE, related_name="reviews_of"
+    )
+    rating = models.IntegerField(choices=SCORE_CHOICES)
