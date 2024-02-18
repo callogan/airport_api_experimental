@@ -1,0 +1,23 @@
+{
+  "name": "United Airlines",
+  "headquarter": "New York City",
+  "web_site_address": "https://www.united.com/",
+  "iata_icao": "1234",
+  "url_logo": "https://uk.wikipedia.org/wiki/%D0%A4%D0%B0%D0%B9%D0%BB:Delta_A350-900_N503DN_landing_ATL_runway_8L.jpg",
+  "airplanes":
+     [
+        {
+    "name": "Airbus A350",
+    "airplane_type": 2,
+    "total_rows": 2,
+    "rows_with_seat_count": [
+        {
+            "seats__row": null,
+            "seat_count": 1
+        }
+    ],
+    "image": "http://127.0.0.1:8000/media/uploads/airplanes/airbus-a350-6f8977d1-1a01-42b3-8cdc-1112a7f603cb.jpg"
+        }
+    ]
+}
+

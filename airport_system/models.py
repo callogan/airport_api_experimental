@@ -4,7 +4,7 @@ import uuid
 import pytz
 from django.conf import settings
 from django.db import models, transaction, IntegrityError
-from django.db.models import Count, Max
+from django.db.models import Count, Max, Avg
 from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework.exceptions import ValidationError
@@ -83,12 +83,59 @@ class Airport(models.Model):
     #     return timezone.localtime(timezone.now(), local_timezone)
 
 
-class Airlines(models.Model):
+class Airline(models.Model):
     name = models.CharField(max_length=255, verbose_name='Name')
     headquarter = models.CharField(max_length=255, verbose_name='Headquarter')
     web_site_address = models.URLField(verbose_name='Web-site Address')
     iata_icao = models.CharField(max_length=20, verbose_name='IATA/ICAO Codes')
     url_logo = models.URLField(blank=True, null=True, verbose_name='URL Logo')
+
+    @property
+    def overall_rating(self):
+        # ratings = self.ratings.all()
+
+        WEIGHTS = {
+            'avg_boarding_deplaining': 0.05,
+            'avg_crew': 0.2,
+            'avg_services': 0.15,
+            'avg_entertainment': 0.1,
+            'avg_wi_fi': 0.05
+        }
+        #
+        # boarding_deplaining_rating = self.airlinerating_set.aggregate(avg_rating=Avg("boarding_deplaining_rating"))["avg_rating"]
+        # crew_rating = self.airlinerating_set.aggregate(avg_rating=Avg("crew_rating"))["avg_rating"]
+        # entertainment_rating = self.airlinerating_set.aggregate(avg_rating=Avg("entertainment_rating"))["avg_rating"]
+        # service_rating = self.airlinerating_set.aggregate(avg_rating=Avg("service_rating"))["avg_rating"]
+        # wi_fi_rating = self.airlinerating_set.aggregate(avg_rating=Avg("wi_fi_rating"))["avg_rating"]
+
+        rating_per_category = self.ratings.filter(airline=self) \
+            .aggregate(
+            avg_boarding_deplaining=Avg('boarding_deplaining_rating'),
+            avg_crew=Avg('crew_rating'),
+            avg_service=Avg('services_rating'),
+            avg_entertainment=Avg('entertainment_rating'),
+            avg_wi_fi=Avg('wi_fi_rating')
+        )
+
+        total_score = 0
+        total_weight = 0
+
+        result_dict = {'overall_rating': 0}
+
+        for category, rating in rating_per_category.items():
+            value = rating
+            weight = WEIGHTS.get(category, 0)
+
+            total_score += value * weight
+            total_weight += weight
+
+            # Добавляем рейтинг по каждой категории в словарь
+            result_dict[category] = value
+
+        if total_weight > 0:
+            result_dict['overall_rating'] = total_score / total_weight
+
+        return result_dict
 
 
 class Route(models.Model):
@@ -97,7 +144,7 @@ class Route(models.Model):
         Airport, related_name="destination_routes", on_delete=models.CASCADE
     )
     distance = models.IntegerField()
-    airlines = models.ForeignKey(Airlines, related_name="routes", on_delete=models.CASCADE)
+    airline = models.ForeignKey(Airline, related_name="routes", on_delete=models.SET_NULL, null=True)
 
     def __str__(self) -> str:
         return f"{self.source.closest_big_city} - {self.destination.closest_big_city}"
@@ -120,39 +167,48 @@ def airplane_image_file_path(instance, filename):
 class Airplane(models.Model):
     name = models.CharField(max_length=255)
     airplane_type = models.ForeignKey(AirplaneType, on_delete=models.CASCADE)
-    airline = models.ForeignKey(Airlines, related_name="airplanes", on_delete=models.CASCADE)
+    airline = models.ForeignKey(Airline, related_name="airplanes", on_delete=models.CASCADE)
     image = models.ImageField(null=True, upload_to=airplane_image_file_path)
 
     @property
     def total_rows(self):
         # Calculate the total number of distinct rows based on associated seats
-        return self.seats.values('row').count()
+        return self.seats.values('row').distinct().count()
 
     def rows_with_seat_count(self):
-        return Airplane.objects.filter(id=self.pk).values(
-            'seats__row'
+        return Seat.objects.filter(airplane_id=self.pk).values(
+            "row"
         ).annotate(
             seat_count=Count('id')
         )
 
+    @property
+    def capacity(self):
+        # rows = self.rows_with_seat_count()
+        # total = 0
+        # for row in rows:
+        #     total += row['seat_count']
+
+        return self.seats.count()
+
+
     def __str__(self) -> str:
         return self.name
 
-    @property
-    def capacity(self) -> int:
-        return self.rows * self.seats_in_row
-    #
-    # def get_rows_info(self):
-    #     # Предположим, что airplanes - это queryset или список объектов Airplane
-    #     airplanes = Airplane.objects.all()
-    #
-    #     # Используем словарь для хранения количества мест в каждом ряду
-    #     rows_info = {}
-    #
-    #     for airplane in airplanes:
-    #         rows_info[airplane.rows] = airplane.seats_in_row
-    #
-    #     return rows_info
+    @staticmethod
+    def validate_airplane(total_rows, total_seats, error):
+        # total_rows = instance.total_rows
+        # total_seats = instance.total_seats
+
+        if total_rows <= 0 or total_seats <= 0:
+            raise error({"error": "Total rows and total seats must be > 0"})
+
+        if total_seats % total_rows != 0:
+            raise error({"error": "Total seats must be divisible by total rows"})
+
+
+    def clean(self):
+        Airplane.validate_airplane(self, ValidationError)
 
 
 class Seat(models.Model):
@@ -196,6 +252,29 @@ class Order(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
 
+    @property
+    def tickets_available(self):
+        # Получение связанных билетов для данного заказа
+        tickets = Ticket.objects.filter(order=self)
+
+        # Получение связанных полетов для билетов заказа
+        flights = Flight.objects.filter(tickets__in=tickets)
+
+        # Получение связанных самолетов для полетов
+        airplanes = Airplane.objects.filter(flight__in=flights)
+
+        # Получение количества сидений в каждом ряду
+        rows_with_seat_count = airplanes.values('seats__row').annotate(seat_count=Count('id'))
+
+        # Агрегированная функция count для билетов заказа
+        sold_tickets = tickets.count()
+
+        # Расчет доступных билетов
+        total_seats = sum(row['seat_count'] for row in rows_with_seat_count)
+        available_tickets = max(0, total_seats - sold_tickets)
+
+        return available_tickets
+
     class Meta:
         ordering = ["-created_at"]
 
@@ -210,21 +289,21 @@ class Ticket(models.Model):
     ]
 
     order = models.ForeignKey(Order, related_name="tickets", on_delete=models.CASCADE)
-    row = models.IntegerField()
-    seat = models.IntegerField()
+    row = models.IntegerField(blank=True, null=True)
+    seat = models.IntegerField(blank=True, null=True)
     flight = models.ForeignKey(Flight, related_name="tickets", on_delete=models.CASCADE)
     allocated = models.BooleanField(default=True)
     type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='check-in-pending')
 
-    def clean(self):
-        super().clean()
-        airplane = self.flight.airplane
-        if self.row > airplane.total_rows:
-            raise ValidationError(f"Row {self.row} is greater than total rows in airplane {airplane}")
-
-        rows = airplane.get_rows_with_seat_count()
-        if self.row in rows and rows[self.row] <= self.seat:
-            raise ValidationError(f"Seat {self.seat} not available in row {self.row}")
+    # def clean(self):
+    #     super().clean()
+    #     airplane = self.flight.airplane
+    #     if self.row > airplane.total_rows:
+    #         raise ValidationError(f"Row {self.row} is greater than total rows in airplane {airplane}")
+    #
+    #     rows = airplane.get_rows_with_seat_count()
+    #     if self.row in rows and rows[self.row] <= self.seat:
+    #         raise ValidationError(f"Seat {self.seat} not available in row {self.row}")
 
     class Meta:
         constraints = [
@@ -244,46 +323,78 @@ class Ticket(models.Model):
         # ordering = ["row", "seat"]
 
     @staticmethod
-    def validate_ticket(row, seat, airplane, flight, error_to_raise):
-        # Your uniqueness validation is already handled by the database constraints.
+    def validate_ticket(row, seat_number, flight, error_to_raise):
+        airplane = flight.airplane
 
-        # Additional validation for range
-        if seat < 1 or seat > airplane.seats_in_row:
-            raise error_to_raise({
-                "seat": f"Seat {seat} is not within the valid range for the airplane."
-            })
+        if row is not None:
+            # Check if row exists for the given aircraft
+            matching_rows = Seat.objects.filter(
+                airplane=airplane,
+                row=row
+            )
 
-        try:
-            with transaction.atomic():
-                Ticket.objects.create(flight=flight, row=row, seat=seat)
-        except IntegrityError:
-            raise error_to_raise({
-                "row": f"Row {row} and seat {seat} combination violates constraints."
-            })
+            if not matching_rows.exists():
+                raise error_to_raise({
+                    "row": f"Row number {row} does not exist for the specified airplane."
+                })
+
+            # Если row валиден, проверяем seat_number
+            if seat_number is not None:
+                matching_seats = matching_rows.filter(seat_number=seat_number)
+
+                if not matching_seats.exists():
+                    raise error_to_raise({
+                        "seat": f"Seat number {seat_number} does not exist for the specified airplane and row {row}."
+                    })
+
+            seat = seat_number
+            # Check if there are no existing tickets with the specified row and seat for the given flight
+            existing_tickets = Ticket.objects.filter(flight=flight, seat=seat, row=row)
+            if existing_tickets.exists():
+                raise error_to_raise({
+                    "row": f"Ticket with row number {row} and seat {seat} already exists for the specified flight."
+                })
+        else:
+            # If both seat_number and row are None, consider it valid
+            pass
 
     def __str__(self):
         return f"{str(self.flight)} (row: {self.row}, seat: {self.seat})"
 
     def allocate_seat(self):
-        # authomated allocation logic, f. e. by check-in
-        if not self.allocated:
-            self.seat = self.flight.get_last_available_seat()
-            self.allocated = True
-            self.save()
+        # automated allocation logic, for example, by check-in
+        if self.type == 'check-in-pending':
+            row, seat_number = self.get_last_available_seat()
+            if row is not None and seat_number is not None:
+                self.row = row  # Assigning the row to the ticket
+                self.seat = seat_number  # Assigning the seat number to the ticket
+                self.type = 'completed'
+                self.save()
 
     def get_last_available_seat(self):
-        # all ticket for the flight
-        booked_seats = Ticket.objects.filter(flight=self)
+        airplane = self.flight.airplane
 
-        # max number of seat in row
-        max_seat_in_row = self.get_max_seat_in_row()
+        # Assuming there is a related Seat model with a field seat_number
+        # and it has a foreign key to Airplane
+        rows = Seat.objects.filter(airplane=airplane).values_list('row', flat=True).distinct()
 
-        # first free seat in a row
-        for seat_number in range(1, max_seat_in_row + 1):
-            if not booked_seats.filter(seat=seat_number).exists():
-                return seat_number
+        # Iterate through each row
+        for row in rows:
+            booked_seats_in_row = Ticket.objects.filter(flight=self.flight, row=row)
 
-        return None
+            # max number of seat in row
+            max_seat_in_row = self.get_max_seat_in_row()
+
+            # first free seat in a row
+            for seat_number in range(1, max_seat_in_row + 1):
+                b = booked_seats_in_row.filter(seat=seat_number)
+                print(b)
+                if not booked_seats_in_row.filter(seat=seat_number).exists():
+                    return row, seat_number
+                    # Если свободное место найдено, выходим из цикла
+                    break
+
+            return None, None
 
     def get_max_seat_in_row(self):
         # Get the related Airplane for the current Ticket
@@ -305,7 +416,7 @@ class Ticket(models.Model):
         Ticket.validate_ticket(
             self.row,
             self.seat,
-            self.flight.airplane,
+            self.flight,
             ValidationError,
         )
 
@@ -324,7 +435,8 @@ class Ticket(models.Model):
             super(Ticket, self).save(using=using,
                                      update_fields=update_fields)
 
-class AirlineEvaluation(models.Model):
+class AirlineRating(models.Model):
+
     SCORE_CHOICES = (
         (1, "1"),
         (2, "2"),
@@ -332,7 +444,14 @@ class AirlineEvaluation(models.Model):
         (4, "4"),
         (5, "5"),
     )
-    airlines = models.ForeignKey(
-        Airlines, on_delete=models.CASCADE, related_name="reviews_of"
+
+    boarding_deplaining_rating = models.SmallIntegerField(choices=SCORE_CHOICES, default=0, blank=True, null=True)
+    crew_rating = models.SmallIntegerField(choices=SCORE_CHOICES, default=0, blank=True, null=True)
+    services_rating = models.SmallIntegerField(choices=SCORE_CHOICES, default=0, blank=True, null=True)
+    entertainment_rating = models.SmallIntegerField(choices=SCORE_CHOICES, default=0, blank=True, null=True)
+    wi_fi_rating = models.SmallIntegerField(choices=SCORE_CHOICES, default=0, blank=True, null=True)
+
+    airline = models.ForeignKey(
+        Airline, on_delete=models.CASCADE, related_name="ratings"
     )
-    rating = models.IntegerField(choices=SCORE_CHOICES)
+

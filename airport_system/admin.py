@@ -7,10 +7,10 @@ from .models import (
     Route,
     AirplaneType,
     Airplane,
-    Airlines,
+    Airline,
     Flight,
     Order,
-    Ticket, Seat,
+    Ticket, Seat, AirlineRating
 )
 
 
@@ -32,11 +32,22 @@ class RouteAdmin(admin.ModelAdmin):
     list_filter = ("source",)
 
 
-@admin.register(Airlines)
-class AirlinesAdmin(admin.ModelAdmin):
-    list_display = ("name", "headquarter", "web_site_address")
-    list_filter = ("name",)
-    search_fields = ("name",)
+class RatingInline(admin.StackedInline):
+    model = AirlineRating
+
+
+@admin.register(Airline)
+class AirlineAdmin(admin.ModelAdmin):
+    list_display = ("name", "headquarter", "web_site_address", "iata_icao", "url_logo", "overall_rating")
+    inlines = [
+        RatingInline,
+    ]
+
+
+@admin.register(AirlineRating)
+class RatingAdmin(admin.ModelAdmin):
+    list_display = ("boarding_deplaining_rating", "crew_rating", "services_rating", "entertainment_rating", "wi_fi_rating")
+#     list_filter = ("category",)
 
 
 @admin.register(Airplane)

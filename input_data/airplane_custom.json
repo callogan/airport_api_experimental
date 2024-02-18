@@ -1,0 +1,13 @@
+{
+
+  "name": "Custom Airplane X500",
+
+  "airline": 2,
+
+  "airplane_type": 2,
+
+  "rows": [1, 2, 3, 4, 5, 6],
+
+  "row_seats_distribution": [5, 8, 10, 10, 8, 5]
+
+}

@@ -1,0 +1,7 @@
+{
+  "name": "Boeing 737",
+  "airline": 1,
+  "airplane_type": 1,
+  "total_rows": 40,
+  "total_seats": 200
+}

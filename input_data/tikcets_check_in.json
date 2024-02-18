@@ -1,0 +1,17 @@
+"tickets": [
+                {
+                    "id": 1,
+                    "flight": 1,
+                    "type": "check-in-pending"
+                }
+]
+
+"tickets": [
+  {
+      "row": null,
+      "seat": null,
+      "flight": 3,
+      "type": "check-in-pending",
+      "allocated": false
+  }
+]

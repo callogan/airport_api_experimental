@@ -1,0 +1,34 @@
+{
+    "name": "Pan American",
+    "headquarter": "Boston",
+    "web_site_address": "https://www.united.com/",
+    "iata_icao": "1234",
+    "url_logo": "https://uk.wikipedia.org/wiki/%D0%A4%D0%B0%D0%B9%D0%BB:Delta_A350-900_N503DN_landing_ATL_runway_8L.jpg",
+    "airplanes": [
+        {
+            "id": 6,
+            "name": "Airbus A350",
+            "airplane_type": 2,
+            "total_rows": 0,
+            "rows_with_seat_count": [],
+            "image": null
+        }
+    ],
+    "overall_rating": 0,
+    "ratings": [
+    {
+      "boarding_deplaining_rating": 5,
+      "crew_rating": 4,
+      "entertainment_rating": 3,
+      "services_rating": 2,
+      "wi_fi_rating": 2
+    },
+    {
+      "boarding_deplaining_rating": 3,
+      "crew_rating": 2,
+      "entertainment_rating": 1,
+      "services_rating": 2,
+      "wi_fi_rating": 2
+    }
+  ]
+}
