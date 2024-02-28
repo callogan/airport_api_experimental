@@ -10,7 +10,7 @@ from .models import (
     Airline,
     Flight,
     Order,
-    Ticket, Seat, AirlineRating
+    Ticket, Seat, AirlineRating, Crew
 )
 
 
@@ -28,7 +28,7 @@ class AirportAdmin(admin.ModelAdmin):
 
 @admin.register(Route)
 class RouteAdmin(admin.ModelAdmin):
-    list_display = ("source", "destination", "distance")
+    list_display = ("source", "destination")
     list_filter = ("source",)
 
 
@@ -81,7 +81,7 @@ class SeatAdmin(admin.ModelAdmin):
 
 @admin.register(Flight)
 class FlightAdmin(admin.ModelAdmin):
-    list_display = ("route", "airplane", "departure_time", "arrival_time")
+    list_display = ("route", "airplane", "departure_time", "real_arrival_time", "estimated_arrival_time")
     list_filter = ("route",)
 
 
@@ -89,6 +89,11 @@ class FlightAdmin(admin.ModelAdmin):
 class TicketAdmin(admin.ModelAdmin):
     list_display = ("order", "flight", "row", "seat")
     list_filter = ("flight",)
+
+
+@admin.register(Crew)
+class CrewAdmin(admin.ModelAdmin):
+    list_display = ("first_name", "last_name")
 
 
 admin.site.register(Country)

@@ -17,7 +17,7 @@ from .models import (
     Route,
     Flight,
     Order,
-    Ticket, Seat, AirlineRating,
+    Ticket, Seat, AirlineRating, Crew,
 )
 
 
@@ -50,16 +50,23 @@ class AirportListSerializer(AirportSerializer):
 class RouteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Route
-        fields = ("id", "source", "destination", "distance")
+        fields = ("id", "source", "destination", "calculate_distance")
 
 
 class RouteListSerializer(RouteSerializer):
     source = serializers.SlugRelatedField(slug_field="name", read_only=True)
     destination = serializers.SlugRelatedField(slug_field="name", read_only=True)
+    calculate_distance = serializers.SerializerMethodField()
+
+    def get_calculate_distance(self, obj):
+        # Return the value of the property from the model instance
+        # print(f"Содержимое объекта obj: {obj}")
+        return obj.calculate_distance()
+
 
     class Meta:
         model = Route
-        fields = ("id", "source", "destination")
+        fields = ("id", "source", "destination", 'calculate_distance')
 
 
 class RouteDetailSerializer(serializers.ModelSerializer):
@@ -68,7 +75,13 @@ class RouteDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Route
-        fields = ("id", "source", "destination", "distance")
+        fields = ("id", "source", "destination", 'calculate_distance')
+
+
+class CrewSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Crew
+        fields = ("id", "first_name", "last_name",)
 
 
 class AirplaneTypeSerializer(serializers.ModelSerializer):
@@ -97,7 +110,7 @@ class AirplaneSerializer(serializers.ModelSerializer):
             "id",
             "name",
             "airplane_type",
-            "capacity",
+            "total_seats",
             "total_rows",
             "rows_with_seat_count",
             "image",
@@ -117,20 +130,22 @@ class AirplaneCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Airplane
-        fields = ['name', 'airline', 'airplane_type', "total_rows",  "total_seats", "rows", "row_seats_distribution"]
+        fields = ['id', 'name', 'airline', 'airplane_type', "total_rows",  "total_seats", "rows", "row_seats_distribution"]
 
     def validate(self, attrs):
-        print(attrs)
+        print("Inside custom validate method")
         data = super(AirplaneCreateSerializer, self).validate(attrs=attrs)
+        print(f"HERE ARE JSON INPUTS {attrs}")
         total_rows = attrs["total_rows"]
         total_seats = attrs["total_seats"]
 
-        Airplane.validate_airplane(
+        Airplane.validate_airplane_standard(
             total_rows,
             total_seats,
             ValidationError
         )
 
+        print("Leaving custom validate method")
         return data
 
     def create(self, validated_data):
@@ -180,39 +195,48 @@ class AirplaneCreateSerializer(serializers.ModelSerializer):
 
 
 class AirlineSerializer(serializers.ModelSerializer):
-    airplanes = AirplaneSerializer(many=True, read_only=False, allow_null=False)
+    airplanes = AirplaneSerializer(many=True, read_only=False, allow_null=True, required=False)
 
     overall_rating = serializers.SerializerMethodField()
 
     avg_boarding_deplaining = serializers.SerializerMethodField(read_only=True)
     avg_crew = serializers.SerializerMethodField(read_only=True)
-    avg_service = serializers.SerializerMethodField(read_only=True)
+    avg_services = serializers.SerializerMethodField(read_only=True)
     avg_entertainment = serializers.SerializerMethodField(read_only=True)
     avg_wi_fi = serializers.SerializerMethodField(read_only=True)
 
     def get_overall_rating(self, obj):
-        return obj.overall_rating['overall_rating']
+        return obj.overall_rating.get('overall_rating', 0)
 
     def get_avg_boarding_deplaining(self, obj):
-        return obj.overall_rating['avg_boarding_deplaining']
+        return obj.overall_rating.get('avg_boarding_deplaining', 0)
 
     def get_avg_crew(self, obj):
-        return obj.overall_rating['avg_crew']
+        return obj.overall_rating.get('avg_crew', 0)
 
-    def get_avg_service(self, obj):
-        return obj.overall_rating['avg_service']
+    def get_avg_services(self, obj):
+        return obj.overall_rating.get('avg_services', 0)
 
     def get_avg_entertainment(self, obj):
-        return obj.overall_rating['avg_entertainment']
+        return obj.overall_rating.get('avg_entertainment', 0)
 
     def get_avg_wi_fi(self, obj):
-        return obj.overall_rating['avg_wi_fi']
+        return obj.overall_rating.get('avg_wi_fi', 0)
 
     def create(self, validated_data):
-        airplanes_data = validated_data.pop('airplanes')
+        if 'airplanes' in validated_data:
+            airplanes_data = validated_data.pop('airplanes')
+        else:
+            airplanes_data = []
+        if 'ratings' in validated_data:
+            ratings_data = validated_data.pop('ratings')
+        else:
+            ratings_data = []
         airline = Airline.objects.create(**validated_data)
         for airplane_data in airplanes_data:
             Airplane.objects.create(airline=airline, **airplane_data)
+        for rating_data in ratings_data:
+            Airplane.objects.create(airline=airline, **rating_data)
         return airline
 
     #RATING LOGIC
@@ -315,7 +339,7 @@ class AirlineSerializer(serializers.ModelSerializer):
             "overall_rating",
             'avg_boarding_deplaining',
             'avg_crew',
-            'avg_service',
+            'avg_services',
             'avg_entertainment',
             'avg_wi_fi',
             'ratings'
@@ -376,23 +400,36 @@ class FlightSerializer(serializers.ModelSerializer):
 
 
 class FlightListSerializer(FlightSerializer, serializers.ModelSerializer):
-    route = serializers.CharField(source="route.__str__", read_only=True)
+    route_source = serializers.CharField(
+        source="route.source",
+    )
+    route_destination = serializers.CharField(
+        source="route.destination", read_only=True
+    )
     airplane_name = serializers.CharField(source="airplane.name", read_only=True)
     airplane_capacity = serializers.IntegerField(
         source="airplane.capacity", read_only=True
     )
     # tickets_available = serializers.IntegerField(read_only=True)
 
+    tickets_available = serializers.SerializerMethodField(read_only=True)
+
+    def get_tickets_available(self, obj):
+        # Return the value of the property from the model instance
+        return obj.tickets_available
+
     class Meta:
         model = Flight
         fields = (
             "id",
-            "route",
+            "route_source",
+            "route_destination",
             "airplane_name",
             "airplane_capacity",
-            # "tickets_available",
+            "tickets_available",
             "departure_time",
-            "arrival_time",
+            "estimated_arrival_time",
+            "real_arrival_time"
         )
 
 
@@ -442,19 +479,14 @@ class FlightDetailSerializer(serializers.ModelSerializer):
             "route",
             "airplane",
             "departure_time",
-            "arrival_time",
+            "estimated_arrival_time",
+            "real_arrival_time",
             "taken_places",
         )
 
 
 class OrderSerializer(serializers.ModelSerializer):
     tickets = TicketSerializer(many=True, read_only=False, allow_null=False)
-
-    tickets_available = serializers.SerializerMethodField()
-
-    def get_tickets_available(self, obj):
-        # Return the value of the property from the model instance
-        return obj.tickets_available
 
     class Meta:
         model = Order

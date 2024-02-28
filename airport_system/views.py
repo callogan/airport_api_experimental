@@ -10,6 +10,7 @@ from rest_framework.decorators import action
 from rest_framework.generics import GenericAPIView, CreateAPIView
 from rest_framework.mixins import UpdateModelMixin, CreateModelMixin, ListModelMixin
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
@@ -21,7 +22,12 @@ from .models import (
     AirplaneType,
     Route,
     Flight,
-    Order, Airline, AirlineRating, Airline, Ticket,
+    Order, Airline, AirlineRating, Airline, Ticket, Crew,
+)
+
+from airport_system.permissions import (
+    IsAdminOrIfAuthenticatedReadOnly,
+    ReadOnlyOrAdminPermission
 )
 
 from .serializers import (
@@ -44,7 +50,7 @@ from .serializers import (
     FlightDetailSerializer,
     OrderSerializer,
     OrderListSerializer, AirplaneImageSerializer, AirlineSerializer, AirlineListSerializer, AirplaneCreateSerializer,
-    RatingSerializer, TicketSerializer,
+    RatingSerializer, TicketSerializer, CrewSerializer,
 )
 
 
@@ -73,6 +79,7 @@ class AirportViewSet(
 ):
     queryset = Airport.objects.select_related("closest_big_city")
     serializer_class = AirportSerializer
+    permission_classes = (IsAdminOrIfAuthenticatedReadOnly,)
 
     def get_serializer_class(self):
         if self.action == "list":
@@ -86,6 +93,7 @@ class AirplaneTypeViewSet(
 ):
     queryset = AirplaneType.objects.all()
     serializer_class = AirplaneTypeSerializer
+    permission_classes = (IsAdminOrIfAuthenticatedReadOnly,)
 
 
 class AirplaneViewSet(
@@ -93,6 +101,7 @@ class AirplaneViewSet(
 ):
     queryset = Airplane.objects.select_related("airplane_type")
     serializer_class = AirplaneSerializer
+    permission_classes = (IsAdminOrIfAuthenticatedReadOnly,)
 
     def get_serializer_class(self):
         if self.action == "list":
@@ -108,7 +117,7 @@ class AirplaneViewSet(
         methods=["POST"],
         detail=True,
         url_path="upload-image",
-        # permission_classes=[IsAdminUser],
+        permission_classes=[IsAdminUser],
     )
     def upload_image(self, request, pk=None):
         airplane = self.get_object()
@@ -127,6 +136,7 @@ class AirlineViewSet(
 ):
     queryset = Airline.objects.all()
     serializer_class = AirlineSerializer
+    permission_classes = (IsAdminOrIfAuthenticatedReadOnly,)
 
     def retrieve(self, request, *args, **kwargs):
         airline = self.get_object()
@@ -190,6 +200,17 @@ class AirlineRatingViewSet(
 ):
     queryset = AirlineRating.objects.all()
     serializer_class = RatingSerializer
+    permission_classes = (IsAdminOrIfAuthenticatedReadOnly,)
+
+
+class CrewViewSet(
+    mixins.CreateModelMixin,
+    mixins.ListModelMixin,
+    GenericViewSet,
+):
+    queryset = Crew.objects.all()
+    serializer_class = CrewSerializer
+    permission_classes = (IsAdminOrIfAuthenticatedReadOnly,)
 
 
 class RouteViewSet(
@@ -203,6 +224,7 @@ class RouteViewSet(
         "destination",
     )
     serializer_class = RouteSerializer
+    permission_classes = (IsAdminOrIfAuthenticatedReadOnly,)
 
     def get_serializer_class(self):
         if self.action == "list":
@@ -278,7 +300,9 @@ class RouteViewSet(
         ]
     )
     def list(self, request, *args, **kwargs):
-        return super().list(request, *args, **kwargs)
+        response = super().list(request, *args, **kwargs)
+        print(response.data)
+        return response
 
 
 class FlightViewSet(
@@ -298,6 +322,7 @@ class FlightViewSet(
         .select_related("route__airline")
     )
     serializer_class = FlightSerializer
+    permission_classes = (ReadOnlyOrAdminPermission,)
 
     def get_serializer_class(self):
         if self.action == "list":
@@ -365,6 +390,7 @@ class OrderViewSet(
     queryset = Order.objects.prefetch_related("tickets__flight__route")
     serializer_class = OrderSerializer
     pagination_class = OrderPagination
+    permission_classes = (IsAuthenticated,)
 
     def get_queryset(self):
         return Order.objects.filter(user=self.request.user)
@@ -386,6 +412,7 @@ class AllocateTicketAPIView(GenericAPIView):
     def patch(self, request, ticket_id):
         try:
             ticket = Ticket.objects.get(pk=ticket_id)
+            print(f"Allocate ticket id {ticket_id}")
         except Ticket.DoesNotExist:
             return Response({"error": "Ticket not found"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -399,7 +426,7 @@ class AllocateTicketAPIView(GenericAPIView):
         #     return Response({"error": "Invalid row or seat value"}, status=status.HTTP_400_BAD_REQUEST)
 
         ticket.allocate_seat()
-        ticket.save()
+        # ticket.save()
 
         serializer = TicketSerializer(ticket)
         return Response(serializer.data, status=status.HTTP_200_OK)
