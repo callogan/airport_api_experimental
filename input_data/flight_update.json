@@ -1,0 +1,12 @@
+{
+    "id": 3,
+    "departure_time": "2024-02-15T06:00:00Z",
+    "estimated_arrival_time": "2024-02-16T12:00:00Z",
+    "real_arrival_time": null,
+    "status": "delayed",
+    "route": 1,
+    "airplane": 813,
+    "crews": [
+        1
+    ]
+}

@@ -28,7 +28,7 @@ class AirportAdmin(admin.ModelAdmin):
 
 @admin.register(Route)
 class RouteAdmin(admin.ModelAdmin):
-    list_display = ("source", "destination")
+    list_display = ("source", "emergent_destination")
     list_filter = ("source",)
 
 

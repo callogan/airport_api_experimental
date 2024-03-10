@@ -6,10 +6,11 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from airport_system.models import (
     Flight, Airport, Route, Airline, Airplane, AirplaneType, Order,
-    Ticket, Seat, City, Country
+    Ticket, Seat, City, Country, Crew
 )
 
 
@@ -22,15 +23,17 @@ class AuthenticatedTicketApiTests(TestCase):
     def setUpTestData(cls):
         cls.client = APIClient()
         cls.user = get_user_model().objects.create_user(
-            "test@test.com",
-            "testpass",
+            "test@gmail.com",
+            "test password",
         )
-        cls.client.force_authenticate(cls.user)
+        refresh = RefreshToken.for_user(cls.user)
+        cls.token = refresh.access_token
+        cls.client.credentials(HTTP_AUTHORIZATION=f"Bearer {cls.token}")
 
-        airline = Airline.objects.create(name="Test airline")
+        cls.airline = Airline.objects.create(name="Test airline")
         cls.airplane = Airplane.objects.create(
             name="Test airplane",
-            airline=airline,
+            airline=cls.airline,
             airplane_type=AirplaneType.objects.create(name="Test type"),
         )
         for seat_row in range(1, 21):
@@ -40,47 +43,49 @@ class AuthenticatedTicketApiTests(TestCase):
                     row=seat_row,
                     seat_number=seat_number,
                 )
-        country_source = Country.objects.create(name="UK")
-        country_destination = Country.objects.create(name="France")
-        closest_big_city_source = City.objects.create(name="London", country=country_source)
-        closest_big_city_destination = City.objects.create(name="Paris", country=country_destination)
+        country_source = Country.objects.create(name="USA")
+        country_destination = Country.objects.create(name="Germany")
+        closest_big_city_source = City.objects.create(name="New York", country=country_source)
+        closest_big_city_destination = City.objects.create(name="Berlin", country=country_destination)
         airport = Airport.objects.create(
-            name="Heathrow Airport",
-            iata_code="LHR",
+            name="John F. Kennedy International Airport",
+            iata_code="JFK",
             closest_big_city=closest_big_city_source
         )
         route = Route.objects.create(
             source=airport,
-            destination=Airport.objects.create(
-                name="Charles de Gaulle Airport",
-                iata_code="CDG",
+            standard_destination=Airport.objects.create(
+                name="Berlin Tegel Airport 'Otto Lilienthal'",
+                iata_code="TXL",
                 closest_big_city=closest_big_city_destination
             ),
-            distance=500,
-            airline=airline
+            airline=cls.airline
         )
         cls.flight = Flight.objects.create(
             airplane=cls.airplane,
             route=route,
             departure_time=datetime(2024, 1, 10, 12, 30, 0),
-            arrival_time=datetime(2024, 1, 10, 14, 30, 0),
-            airport=airport,
+            estimated_arrival_time=datetime(2024, 1, 10, 14, 30, 0),
             status="in-flight"
         )
+
+        crew = Crew.objects.create(first_name="John", last_name="Doe")
+        cls.flight.crew.add(crew.id)
         cls.flight.save()
 
         cls.order = Order.objects.create(user=cls.user)
+
         cls.ticket_allocated = Ticket(
             seat=1, row=1, flight=cls.flight, order=cls.order
         )
         cls.ticket_allocated.save()
+
         cls.ticket_not_allocated = Ticket(
             flight=cls.flight, order=cls.order
         )
         cls.ticket_not_allocated.save()
 
-
-    def test_validate_ticket_with_wrong_seat(self):
+    def test_validate_ticket_wrong_seat(self):
         row = 18
         seat_number = 21
         message = f"Seat number {seat_number} does not exist for the specified airplane and row {row}."
@@ -110,10 +115,7 @@ class AuthenticatedTicketApiTests(TestCase):
             )
         )
 
-
     def test_update_ticket_with_row_and_seat(self):
-        ticket_id = self.ticket_not_allocated.id
-
         payload = {
             "row": 1,
             "seat": 2
@@ -121,10 +123,64 @@ class AuthenticatedTicketApiTests(TestCase):
 
         res = self.client.patch(allocate_url(self.ticket_not_allocated.id), data=payload)
 
-        # Обновляем тикет из базы данных
         self.ticket_not_allocated.refresh_from_db()
 
-        # Проверяем результаты
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.assertEqual(payload["row"], self.ticket_not_allocated.row)
         self.assertEqual(payload["seat"], self.ticket_not_allocated.seat)
+
+    #TEMPORARY CODE
+    def test_unique_row_seat_flight(self):
+        # Тест уникальности комбинаций row, seat и flight
+        airline = Airline.objects.create(name="Test airline")
+        country_source = Country.objects.create(name="Portugal")
+        country_destination = Country.objects.create(name="Poland")
+        closest_big_city_source = City.objects.create(
+            name="Lisbon", country=country_source
+        )
+        closest_big_city_destination = City.objects.create(
+            name="Warsaw", country=country_destination
+        )
+        route_3 = Route.objects.create(
+            source=Airport.objects.create(
+                name="Humberto Delgado Airport",
+                iata_code="LIS",
+                closest_big_city=closest_big_city_source
+            ),
+            standard_destination=Airport.objects.create(
+                name="Warsaw Chopin Airport",
+                iata_code="WAW",
+                closest_big_city=closest_big_city_destination,
+            ),
+            airline=airline
+        )
+        # crew = Crew.objects.create(first_name="Julie", last_name="Harrington")
+        airplane = Airplane.objects.create(
+            name="Test airplane",
+            airline=airline,
+            airplane_type=AirplaneType.objects.create(name="Test type"),
+        )
+        for seat_row in range(1, 21):
+            for seat_number in range(1, 16):
+                Seat.objects.create(
+                    airplane=airplane,
+                    row=seat_row,
+                    seat_number=seat_number,
+                )
+        flight_1 = Flight.objects.create(
+            airplane=airplane,
+            route=route_3,
+            departure_time="2022-06-02 14:00",
+            estimated_arrival_time="2022-06-02 20:00"
+        )
+        order = Order.objects.create(user=self.user)
+        obj1 = Ticket(row=1, seat=1, flight=flight_1, order=order)
+        obj1.save()
+
+        obj2 = Ticket(row=1, seat=1, flight=flight_1, order=order)
+        try:
+            obj2.save()
+            self.fail("Expected an exception but none was raised")  # If no exception is raised, fail the test
+        except Exception as e:
+            print(f"Тип исключения: {type(e)}")
+            print(f"Сообщение исключения: {e}")

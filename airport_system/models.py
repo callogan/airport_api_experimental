@@ -1,25 +1,16 @@
 import os
 import uuid
 
-import geopy
 import pytz
 from django.conf import settings
-from django.db import models, transaction, IntegrityError
+from django.db import models
 from django.db.models import Count, Max, Avg
-from django.utils import timezone
 from django.utils.text import slugify
 from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
 from rest_framework.exceptions import ValidationError
 
 from geopy.distance import geodesic
 from geopy.geocoders import Nominatim
-
-import requests
-
-api_key = "5b3ce3597851110001cf62481ef77efde0bd464daa0709220725e368"
-
-
-# from rest_framework.exceptions import ValidationError
 
 
 class Country(models.Model):
@@ -45,38 +36,6 @@ class City(models.Model):
         verbose_name_plural = "cities"
 
 
-# def get_timezone_choices():
-#     timezones = pytz.all_timezones
-#     choices = []
-#
-#     for tz in timezones:
-#         timezone = pytz.timezone(tz)
-#         current_time = datetime.now()
-#
-#         # Локализация времени в выбранной тайм зоне
-#         localized_time = timezone.localize(current_time)
-#
-#         # Нормализация времени (учитывает переход на летнее/зимнее время)
-#         normalized_time = timezone.normalize(localized_time)
-#
-#         # Перевод времени в UTC (если оно в летнее время)
-#         utc_time = normalized_time.astimezone(pytz.utc)
-#
-#         # Проверка, находится ли текущее время в летнем времени
-#         is_dst = normalized_time.dst() != timedelta(0)
-#
-#         # Формирование строки с названием тайм зоны, учетом зимнего/летнего времени
-#         if is_dst:
-#             choices.append((tz, f'{tz} ({normalized_time.strftime("%z")} - {timezone.tzname(utc_time)})'))
-#         else:
-#             choices.append((tz, f'{tz} ({normalized_time.strftime("%z")} - {timezone.tzname(None)})'))
-#
-#     return choices
-#
-# class YourModel(models.Model):
-#     timezone = models.CharField(max_length=63, default='UTC', choices=get_timezone_choices())
-
-
 class Airport(models.Model):
     name = models.CharField(max_length=255)
     closest_big_city = models.ForeignKey(City, on_delete=models.CASCADE)
@@ -86,10 +45,6 @@ class Airport(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.closest_big_city}) - {self.iata_code}"
-    #
-    # def current_local_time(self):
-    #     local_timezone = pytz.timezone(self.timezone)
-    #     return timezone.localtime(timezone.now(), local_timezone)
 
 
 class Airline(models.Model):
@@ -101,7 +56,6 @@ class Airline(models.Model):
 
     @property
     def overall_rating(self):
-        # ratings = self.ratings.all()
 
         WEIGHTS = {
             'avg_boarding_deplaining': 0.05,
@@ -110,12 +64,6 @@ class Airline(models.Model):
             'avg_entertainment': 0.1,
             'avg_wi_fi': 0.05
         }
-        #
-        # boarding_deplaining_rating = self.airlinerating_set.aggregate(avg_rating=Avg("boarding_deplaining_rating"))["avg_rating"]
-        # crew_rating = self.airlinerating_set.aggregate(avg_rating=Avg("crew_rating"))["avg_rating"]
-        # entertainment_rating = self.airlinerating_set.aggregate(avg_rating=Avg("entertainment_rating"))["avg_rating"]
-        # service_rating = self.airlinerating_set.aggregate(avg_rating=Avg("service_rating"))["avg_rating"]
-        # wi_fi_rating = self.airlinerating_set.aggregate(avg_rating=Avg("wi_fi_rating"))["avg_rating"]
 
         rating_per_category = self.ratings.filter(airline=self) \
             .aggregate(
@@ -125,26 +73,6 @@ class Airline(models.Model):
             avg_entertainment=Avg('entertainment_rating'),
             avg_wi_fi=Avg('wi_fi_rating')
         )
-
-        # print(rating_per_category)
-        # avg_boarding_deplaining = rating_per_category['avg_boarding_deplaining']
-        # avg_crew = rating_per_category['avg_crew']
-        # avg_services = rating_per_category['avg_services']
-        # avg_entertainment = rating_per_category['avg_entertainment']
-        # avg_wi_fi = rating_per_category['avg_wi_fi']
-        #
-        # print("avg_boarding_deplaining:", avg_boarding_deplaining)
-        # print("avg_crew:", avg_crew)
-        # print("avg_services:", avg_services)
-        # print("avg_entertainment:", avg_entertainment)
-        # print("avg_wi_fi:", avg_wi_fi)
-
-        # Проверка содержимого переменных
-        # print(f"Avg Boarding Deplaining: {rating_per_category['avg_boarding_deplaining']}")
-        # print(f"Avg Crew: {rating_per_category['avg_crew']}")
-        # print(f"Avg Service: {rating_per_category['avg_service']}")
-        # print(f"Avg Entertainment: {rating_per_category['avg_entertainment']}")
-        # print(f"Avg Wi-Fi: {rating_per_category['avg_wi_fi']}")
 
         total_score = 0
         total_weight = 0
@@ -160,22 +88,33 @@ class Airline(models.Model):
             total_score += value * weight
             total_weight += weight
 
-            # Добавляем рейтинг по каждой категории в словарь
             result_dict[category] = value
 
         if total_weight > 0:
             result_dict['overall_rating'] = total_score / total_weight
-        # print(result_dict)
         return result_dict
 
 
 class Route(models.Model):
+    STATUS_CHOICES = [
+        ('on schedule', 'On schedule'),
+        ('emergency', 'Emergency'),
+    ]
+
     source = models.ForeignKey(Airport, related_name="source_routes", on_delete=models.CASCADE)
-    destination = models.ForeignKey(
+    standard_destination = models.ForeignKey(
         Airport, related_name="destination_routes", on_delete=models.CASCADE
     )
-    # distance = models.IntegerField()
+    emergent_destination = models.ForeignKey(
+        Airport,
+        related_name="emergent_destination_routes",
+        on_delete=models.CASCADE,
+        blank=True,
+        null=True
+    )
+    distance = models.IntegerField(blank=True, null=True)
     airline = models.ForeignKey(Airline, related_name="routes", on_delete=models.SET_NULL, null=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='on schedule')
 
     def calculate_distance(self):
         try:
@@ -187,18 +126,23 @@ class Route(models.Model):
             longitude1 = location1.longitude
 
             location2 = geolocator.geocode(
-                f"{self.destination.closest_big_city.name}, {self.destination.closest_big_city.country.name}")
+                f"{self.standard_destination.closest_big_city.name}, {self.standard_destination.closest_big_city.country.name}")
             latitude2 = location2.latitude
             longitude2 = location2.longitude
 
             distance = geodesic((latitude1, longitude1), (latitude2, longitude2), ellipsoid='GRS-67').kilometers
 
             return int(distance)
-        except (GeocoderTimedOut, GeocoderUnavailable, Exception):
-            return 0
+        except (GeocoderTimedOut, GeocoderUnavailable):
+            return -1
+
+    def save(self, *args, **kwargs):
+        if not self.distance:
+            self.distance = self.calculate_distance()
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:
-        return f"{self.source.closest_big_city} - {self.destination.closest_big_city}"
+        return f"{self.source.closest_big_city} - {self.standard_destination.closest_big_city}"
 
 
 class AirplaneType(models.Model):
@@ -210,7 +154,6 @@ class AirplaneType(models.Model):
 
 def airplane_image_file_path(instance, filename):
     _, extension = os.path.splitext(filename)
-    print(f"BLANK LINE {_}")
     filename = f"{slugify(instance.name)}-{uuid.uuid4()}{extension}"
 
     return os.path.join("uploads", "airplanes", filename)
@@ -227,6 +170,10 @@ class Airplane(models.Model):
         # Calculate the total number of distinct rows based on associated seats
         return self.seats.values('row').distinct().count()
 
+    @property
+    def total_seats(self):
+        return self.seats.count()
+
     def rows_with_seat_count(self):
         return Seat.objects.filter(airplane_id=self.pk).values(
             "row"
@@ -234,24 +181,11 @@ class Airplane(models.Model):
             seat_count=Count('id')
         )
 
-    @property
-    def total_seats(self):
-        # rows = self.rows_with_seat_count()
-        # total = 0
-        # for row in rows:
-        #     total += row['seat_count']
-
-        return self.seats.count()
-
-
     def __str__(self) -> str:
         return self.name
 
     @staticmethod
     def validate_airplane_standard(total_rows, total_seats, error):
-        # total_rows = instance.total_rows
-        # total_seats = instance.total_seats
-
         if total_rows <= 0 or total_seats <= 0:
             raise error({"error": "Total rows and total seats must be > 0"})
 
@@ -259,13 +193,10 @@ class Airplane(models.Model):
             raise error({"error": "Total seats must be divisible by total rows"})
 
     @staticmethod
-    def validate_airplane_custom(rows, row_seats_distribution, error):
-        if rows <= 0 or any(seats <= 0 for seats in row_seats_distribution) or not row_seats_distribution:
+    def validate_airplane_custom(row_seats_distribution, error):
+        if any(seats <= 0 for seats in row_seats_distribution) or not row_seats_distribution:
             raise error(
                 {"error": "Rows and seats distribution must be > 0, and seat distribution list must not be empty"})
-
-    # def clean(self):
-    #     Airplane.validate_airplane(self, ValidationError)
 
 
 class Seat(models.Model):
@@ -296,19 +227,10 @@ class Flight(models.Model):
 
     route = models.ForeignKey(Route, related_name="flights", on_delete=models.CASCADE)
     airplane = models.ForeignKey(Airplane, on_delete=models.CASCADE)
-    crews = models.ManyToManyField(Crew, related_name="flights")
+    crew = models.ManyToManyField(Crew, related_name="flights")
     departure_time = models.DateTimeField()
     estimated_arrival_time = models.DateTimeField()
     real_arrival_time = models.DateTimeField(blank=True, null=True)
-    emergent_airport = models.ForeignKey(
-        Airport,
-        related_name="emergent_flights",
-        to_field='id',
-        on_delete=models.CASCADE,
-        blank=True,
-        null=True
-    )
-    standard_airport = models.ForeignKey(Airport, related_name="standard_flights", to_field='id', on_delete=models.CASCADE)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='in flight')
 
     @property
@@ -367,32 +289,10 @@ class Ticket(models.Model):
     allocated = models.BooleanField(default=True)
     type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='check-in-pending')
 
-    # def clean(self):
-    #     super().clean()
-    #     airplane = self.flight.airplane
-    #     if self.row > airplane.total_rows:
-    #         raise ValidationError(f"Row {self.row} is greater than total rows in airplane {airplane}")
-    #
-    #     rows = airplane.get_rows_with_seat_count()
-    #     if self.row in rows and rows[self.row] <= self.seat:
-    #         raise ValidationError(f"Seat {self.seat} not available in row {self.row}")
-
     class Meta:
         constraints = [
             models.UniqueConstraint(fields=['row', 'seat', 'flight'], name='unique_row_seat_flight')
         ]
-    # class Meta:
-    #     constraints = [
-    #         models.UniqueConstraint(fields=['row', 'seat', 'flight'], name='unique_row_seat_flight'),
-    #         models.CheckConstraint(
-    #             check=~models.Q(
-    #                 flight__airplane__total_rows__contains={"row": models.F("row")},
-    #                 flight__airplane__get_rows_with_seat_count__seats__lt=models.F("seat")
-    #             ),
-    #             name="validate_row_and_seat"
-    #         )
-    #     ]
-        # ordering = ["row", "seat"]
 
     @staticmethod
     def validate_ticket(row, seat_number, flight, error_to_raise):
@@ -448,7 +348,7 @@ class Ticket(models.Model):
 
         # Assuming there is a related Seat model with a field seat_number
         # and it has a foreign key to Airplane
-        rows = Seat.objects.filter(airplane=airplane).values_list('row', flat=True).distinct()
+        rows = Seat.objects.filter(airplane=airplane).values_list('row', flat=True).distinct().order_by("row")
 
         # Iterate through each row
         for row in rows:
@@ -459,8 +359,6 @@ class Ticket(models.Model):
 
             # first free seat in a row
             for seat_number in range(1, max_seat_in_row + 1):
-                b = booked_seats_in_row.filter(seat=seat_number)
-                print(b)
                 if not booked_seats_in_row.filter(seat=seat_number).exists():
                     return row, seat_number
                     # Если свободное место найдено, выходим из цикла
@@ -507,6 +405,7 @@ class Ticket(models.Model):
             super(Ticket, self).save(using=using,
                                      update_fields=update_fields)
 
+
 class AirlineRating(models.Model):
 
     SCORE_CHOICES = (
@@ -526,4 +425,3 @@ class AirlineRating(models.Model):
     airline = models.ForeignKey(
         Airline, on_delete=models.CASCADE, related_name="ratings"
     )
-

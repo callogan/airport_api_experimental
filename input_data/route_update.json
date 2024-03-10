@@ -1,0 +1,8 @@
+{
+    "id": 6,
+    "source": 1,
+    "standard_destination": 2,
+    "emergent_destination": null,
+    "calculate_distance": 0,
+    "status": "emergency"
+}

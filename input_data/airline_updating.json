@@ -7,14 +7,14 @@
     "url_logo": "https://uk.wikipedia.org/wiki/%D0%A4%D0%B0%D0%B9%D0%BB:Delta_A350-900_N503DN_landing_ATL_runway_8L.jpg",
     "airplanes": [
         {
-            "id": 797,
-            "name": "Airbus A350",
-            "airplane_type": 2
+            "id": 813,
+            "name": "Boeing 737",
+            "airplane_type": 1
         },
     {
-        "id": 4,
-        "name": "Airbus A350",
-        "airplane_type": 2
+        "id": 814,
+        "name": "Boeing 737",
+        "airplane_type": 1
     }
     ],
     "overall_rating": 1.7500000000000002,
