@@ -174,12 +174,18 @@ class Airplane(models.Model):
     def total_seats(self):
         return self.seats.count()
 
-    def rows_with_seat_count(self):
+    def custom_rows_with_seat_count(self):
         return Seat.objects.filter(airplane_id=self.pk).values(
             "row"
         ).annotate(
             seat_count=Count('id')
         )
+
+    def standard_number_seats_in_row(self):
+        seat_counts = [row_data['seat_count'] for row_data in self.custom_rows_with_seat_count()]
+        if len(set(seat_counts)) == 1:
+            return seat_counts[0]
+        return None
 
     def __str__(self) -> str:
         return self.name
@@ -425,3 +431,8 @@ class AirlineRating(models.Model):
     airline = models.ForeignKey(
         Airline, on_delete=models.CASCADE, related_name="ratings"
     )
+
+    created_time = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_time"]

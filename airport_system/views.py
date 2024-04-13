@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db.models import Q
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema, OpenApiParameter
@@ -94,7 +94,13 @@ class AirplaneTypeViewSet(
     serializer_class = AirplaneTypeSerializer
     permission_classes = (IsAdminOrIfAuthenticatedReadOnly,)
 
-
+@extend_schema(
+        parameters=[
+           # serializer fields are converted to parameters
+          OpenApiParameter(name="total_rows", description="Some", required=True),  # serializer object is converted to a parameter
+        ]
+        # more customizations
+    )
 class AirplaneViewSet(
     mixins.ListModelMixin,
     mixins.CreateModelMixin,
@@ -160,6 +166,11 @@ class AirlineViewSet(
         return self.serializer_class
 
 
+class AirlineRatingPagination(PageNumberPagination):
+    page_size = 10
+    max_page_size = 100
+
+
 class AirlineRatingViewSet(
     mixins.ListModelMixin,
     mixins.CreateModelMixin,
@@ -167,7 +178,31 @@ class AirlineRatingViewSet(
 ):
     queryset = AirlineRating.objects.all()
     serializer_class = RatingSerializer
+    pagination_class = AirlineRatingPagination
     permission_classes = (IsAdminOrIfAuthenticatedReadOnly,)
+
+    def get_queryset(self):
+        airline = self.request.query_params.get("airline")
+
+        if airline:
+            self.queryset = self.queryset.filter(airline__name__icontains=airline)
+
+        return self.queryset
+
+    @extend_schema(
+        parameters=[
+            # serializer fields are converted to parameters
+            OpenApiParameter(name="airline", description="Some", required=True),
+            # serializer object is converted to a parameter
+        ]
+        # more customizations
+    )
+    def list(self, request, *args, **kwargs):
+        if 'airline' in request.query_params:
+            return super().list(request, *args, **kwargs)
+        else:
+            return Response({"status": "Query parameter 'airline' is required."},
+                            status=status.HTTP_400_BAD_REQUEST)
 
 
 class CrewViewSet(
@@ -370,9 +405,21 @@ class OrderViewSet(
 
 class AllocateTicketAPIView(GenericAPIView):
 
-    serializer_class = TicketSerializer
+   serializer_class = TicketSerializer
 
-    def patch(self, request, ticket_id):
+   @extend_schema(
+        description="Allocate seat for a ticket by providing row and seat parameters.",
+        # request={
+        #     "type": "object",
+        #     "properties": {
+        #         "row": {"type": "integer", "description": "Row number for the seat."},
+        #         "seat": {"type": "integer", "description": "Seat number in the row."},
+        #     },
+        #     "required": ["row", "seat"],
+        # },
+        responses={status.HTTP_200_OK: TicketSerializer}
+   )
+   def patch(self, request, ticket_id):
         try:
             ticket = Ticket.objects.get(pk=ticket_id)
         except ObjectDoesNotExist as e:
@@ -385,3 +432,7 @@ class AllocateTicketAPIView(GenericAPIView):
 
         serializer = TicketSerializer(ticket)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+
+

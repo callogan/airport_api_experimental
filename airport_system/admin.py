@@ -34,6 +34,17 @@ class RouteAdmin(admin.ModelAdmin):
 
 class RatingInline(admin.StackedInline):
     model = AirlineRating
+    list_display = ("overall_rating")
+
+# class RatingInline(admin.TabularInline):
+#     model = AirlineRating
+#     extra = 1
+#
+#     readonly_fields = ("overall_rating",)
+#
+#     @admin.display(description="overall_rating")
+#     def overall_rating(self, obj):
+#         return obj.overall_rating
 
 
 @admin.register(Airline)
@@ -42,6 +53,7 @@ class AirlineAdmin(admin.ModelAdmin):
     inlines = [
         RatingInline,
     ]
+    exclude = ["wi_fi_rating"]
 
 
 @admin.register(AirlineRating)
@@ -52,17 +64,16 @@ class RatingAdmin(admin.ModelAdmin):
 
 @admin.register(Airplane)
 class AirplaneAdmin(admin.ModelAdmin):
-    list_display = ("name", "get_total_rows", "get_rows_with_seats_count")
+    readonly_fields = ["total_rows"]
 
-    def get_total_rows(self, obj):
+    @admin.display(description="total_rows")
+    def total_rows(self, obj):
         return obj.total_rows
-
-    get_total_rows.short_description = "Total Rows"
-
-    def get_rows_with_seats_count(self, obj):
-        return obj.rows_with_seat_count()
-
-    get_rows_with_seats_count.short_description = "Rows with seats"
+    #
+    # def rows_with_seats_count(self, obj):
+    #     return obj.rows_with_seat_count()
+    #
+    # rows_with_seats_count.short_description = "Rows with seats"
 
     # class MyModelAdmin(admin.ModelAdmin):
     #     list_display = ('my_property_display', 'other_field', 'another_field')

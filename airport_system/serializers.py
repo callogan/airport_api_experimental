@@ -1,4 +1,6 @@
 from django.db import transaction
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema_field, extend_schema_serializer, OpenApiExample
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
@@ -35,7 +37,7 @@ class CityListSerializer(CitySerializer):
 
 
 class AirportSerializer(serializers.ModelSerializer):
-    closest_big_city = serializers.CharField(max_length=255)
+    # closest_big_city = serializers.CharField(max_length=255)
 
     class Meta:
         model = Airport
@@ -88,16 +90,11 @@ class AirplaneTypeSerializer(serializers.ModelSerializer):
 
 
 class AirplaneSerializer(serializers.ModelSerializer):
-    total_rows = serializers.SerializerMethodField()
-    rows_with_seat_count = serializers.SerializerMethodField()
+    total_rows = serializers.SerializerMethodField(help_text='A list where each element represents the number of seats in respective row of the airplane.')
+    standard_number_seats_in_row = serializers.SerializerMethodField(help_text='A list where each element represents the number of seats in respective row of the airplane.')
+    custom_rows_with_seat_count = serializers.SerializerMethodField(help_text='A list where each element represents the number of seats in respective row of the airplane.')
 
-    def get_total_rows(self, obj):
-        # Return the value of the property from the model instance
-        return obj.total_rows
 
-    def get_rows_with_seat_count(self, obj):
-        # Return the value of the property from the model instance
-        return obj.rows_with_seat_count()
 
     class Meta:
         model = Airplane
@@ -107,20 +104,61 @@ class AirplaneSerializer(serializers.ModelSerializer):
             "airplane_type",
             "total_seats",
             "total_rows",
-            "rows_with_seat_count",
+            'standard_number_seats_in_row',
+            "custom_rows_with_seat_count",
             "image",
             "airline"
         )
+
+    # @extend_schema_field(OpenApiTypes.INT, description="The date and time when the total rows were last updated")
+    def get_total_rows(self, obj):
+        # Return the value of the property from the model instance
+        return obj.total_rows
+
+    # @extend_schema_field(OpenApiTypes.INT, description="Average number seats in row in case when standard airplane is being created")
+    def get_standard_number_seats_in_row(self, obj):
+        # Return the value of the property from the model instance
+          return obj.standard_number_seats_in_row()
+
+    # @extend_schema_field(OpenApiTypes.DICT, description="Distribution of seats for each single row in case when custom airplane is being created"
+    #                            "Reflected as list with integers where value means number of seats and position of integer"
+    #                            "means number of row for which number of seats is distributed")
+    def get_custom_rows_with_seat_count(self, obj):
+        # Return the value of the property from the model instance
+        if obj.standard_number_seats_in_row() is not None:
+            return None
+        else:
+            return obj.custom_rows_with_seat_count()
+
 
 
 class AirplaneListSerializer(AirplaneSerializer):
     airplane_type = serializers.SlugRelatedField(slug_field="name", read_only=True)
 
 
+@extend_schema_serializer(
+    examples=[
+        OpenApiExample(
+            "Standard Configuration",
+            value={
+                "total_rows": 10,
+                "total_seats": 60
+            }
+        ),
+        OpenApiExample(
+            "Custom Configuration",
+            value={"row_seats_distribution": [7, 7, 7, 7, 7, 7, 7, 7]}
+        )
+    ]
+)
 class AirplaneCreateSerializer(serializers.ModelSerializer):
-    total_rows = serializers.IntegerField(required=False)
-    total_seats = serializers.IntegerField(required=False)
-    row_seats_distribution = serializers.ListField(child=serializers.IntegerField(), required=False)
+    total_rows = serializers.IntegerField(required=False, help_text='Total number of rows in the airplane.')
+    total_seats = serializers.IntegerField(required=False, help_text='Total number of seats in the airplane.')
+    row_seats_distribution = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        help_text='A list where each element represents the number of seats in respective row of the airplane.'
+    )
 
     class Meta:
         model = Airplane
@@ -147,9 +185,39 @@ class AirplaneCreateSerializer(serializers.ModelSerializer):
         return data
 
     def create(self, validated_data):
+
         total_rows = validated_data.pop('total_rows', None)
+
+        # @extend_schema_field({
+        #     "name": "total_rows",
+        #     "description": "Total number of rows for standard airplane (with the same number of seats in each single"
+        #                    "row",
+        #     "type": "integer",
+        #     "format": "int32"
+        # })
+
+
         total_seats = validated_data.pop('total_seats', None)
+
+
+        # @extend_schema_field({
+        #     "name": "total_seats",
+        #     "description": "Total number of seats for standard airplane (with the same number of seats in each single"
+        #                    "row",
+        #     "type": "integer",
+        #     "format": "int32"
+        # })
+
         row_seats_distribution = validated_data.pop('row_seats_distribution', None)
+
+        # @extend_schema_field({
+        #     "name": "row_seats_distribution",
+        #     "description": "Distribution of seats for each single row in case when custom airplane is being created"
+        #                    "Reflected as list with integers where value means number of seats and position of integer"
+        #                    "means number of row for which number of seats is distributed",
+        #     "type": "list of dictionaries",
+        #     "format": "int32"
+        # })
 
         airplane_instance = super().create(validated_data)
 
@@ -281,7 +349,8 @@ class RatingSerializer(serializers.ModelSerializer):
             'crew_rating',
             'services_rating',
             'entertainment_rating',
-            'wi_fi_rating'
+            'wi_fi_rating',
+            'created_time'
         )
 
 

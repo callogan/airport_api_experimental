@@ -118,7 +118,7 @@ class AdminAirportApiTests(TestCase):
         payload = {
             "name": "Test airport 1",
             "iata_code": "XYZ",
-            "closest_big_city": closest_big_city,
+            "closest_big_city": closest_big_city.id,
             'timezone': 'UTC'
         }
         res = self.client.post(AIRPORT_URL, payload)

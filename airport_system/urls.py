@@ -28,7 +28,7 @@ router.register("ratings", AirlineRatingViewSet)
 
 urlpatterns = router.urls + [
     # path('ratings/', AirlineRatingViewSet.as_view({'get': 'list', 'post': 'create'}), name='rating-list'),
-    path('tickets/<int:ticket_id>/allocate/', AllocateTicketAPIView.as_view(), name='ticket_allocate'),
+    path('tickets/<int:ticket_id>/allocate/', AllocateTicketAPIView.as_view(), name='ticket_allocate'), #redundant
 ]
 
 app_name = "airport_system"
